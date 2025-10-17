@@ -1,18 +1,34 @@
 import pygame
+import sounddevice as sd
+import numpy as np
 from random import randint
 
 pygame.init()
 screen = pygame.display.set_mode((1200, 800))
 clock = pygame.time.Clock()
 pipe_speed = 6
+y_vel = 0.0
+gravity = 0.4
+THRESH = 0.01
+IMPULSE = -8.0
+mic_level = 0.0
+score = 0
 font = pygame.font.Font(None, 80)
-small_font = pygame.font.Font(None, 50)
 background = pygame.image.load("fon.png")
 bird_img = pygame.image.load("b1.png")
 pipe_img = pygame.image.load("pipe.png")
 pipe_img = pygame.transform.scale(pipe_img, (140, 440))
 bird_img = pygame.transform.scale(bird_img, (50, 50))
 background = pygame.transform.scale(background, (1200, 800))
+
+
+def audio_cb(indata, frames, time, status):
+    global mic_level
+    if status:
+        return
+    rms = float(np.sqrt(np.mean(indata ** 2)))
+    mic_level = 0.85 * mic_level + 0.15 * rms
+
 def generate_pipes(count, pipe_width=140, gap=280, min_height=50, max_height=440, distance=650):
     pipes = []
     start_x = 1200
@@ -32,21 +48,20 @@ def draw_button(text, rect, color):
 
 def show_menu():
     while True:
-        screen.fill((0,0,0))
+        screen.fill((0, 0, 0))
         start_button = pygame.Rect(500, 350, 200, 80)
         draw_button("Start", start_button, (0, 255, 0))
-
         for e in pygame.event.get():
             if e.type == pygame.QUIT:
                 pygame.quit()
                 exit()
             if e.type == pygame.MOUSEBUTTONDOWN and start_button.collidepoint(pygame.mouse.get_pos()):
                 return
-
         pygame.display.update()
         clock.tick(60)
 
 def show_restart():
+    global score
     while True:
         screen.fill((0, 0, 0))
         restart_button = pygame.Rect(500, 350, 200, 80)
@@ -58,62 +73,54 @@ def show_restart():
                 pygame.quit()
                 exit()
             if e.type == pygame.MOUSEBUTTONDOWN and restart_button.collidepoint(pygame.mouse.get_pos()):
+                score = 0
                 return
-
         pygame.display.update()
         clock.tick(60)
 
 def game_loop():
+    global y_vel, score
+    print(sd.query_devices())
     bird = pygame.Rect(100, 400, 50, 50)
     pipes = generate_pipes(3)
-    y_move = 0
     run = True
-
-    while run:
-        for e in pygame.event.get():
-            if e.type == pygame.QUIT:
-                pygame.quit()
-                exit()
-            if e.type == pygame.KEYDOWN:
-                if e.key == pygame.K_w:
-                    y_move = -5
-                if e.key == pygame.K_s:
-                    y_move = 5
-            if e.type == pygame.KEYUP:
-                if e.key in (pygame.K_w, pygame.K_s):
-                    y_move = 0
-
-        bird.y += y_move
-        if bird.top < 0:
-            bird.top = 0
-        if bird.bottom > 800:
-            bird.bottom = 800
-
-        for p in pipes:
-            p.x -= pipe_speed
-
-        if pipes[0].right < 0:
-            pipes.pop(0)
-            pipes.pop(0)
-            last_x = pipes[-1].x
-            new = generate_pipes(1)
-            for n in new:
-                n.x = last_x + 650
-            pipes.extend(new)
-
-        for p in pipes:
-            if bird.colliderect(p):
-                run = False
-
-        screen.blit(background, (0, 0))
-        screen.blit(bird_img, (bird.x, bird.y))
-        screen.blit(pipe_img, (pipes[0].x, pipes[0].y))
-        for p in pipes:
-            pygame.draw.rect(screen, (0, 255, 0), p)
-
-        pygame.display.update()
-        clock.tick(60)
-
+    with sd.InputStream(device=3, samplerate=40000, channels=1, blocksize=1000, callback=audio_cb):
+        while run:
+            for e in pygame.event.get():
+                if e.type == pygame.QUIT:
+                    pygame.quit()
+                    exit()
+            if mic_level > THRESH:
+                y_vel = IMPULSE
+            y_vel += gravity
+            bird.y += int(y_vel)
+            if bird.top < 0:
+                bird.top = 0
+                y_vel = 0
+            if bird.bottom > 800:
+                bird.bottom = 800
+                y_vel = 0
+            for p in pipes:
+                p.x -= pipe_speed
+            if pipes[0].right < 0:
+                pipes.pop(0)
+                pipes.pop(0)
+                score += 1
+                last_x = pipes[-1].x
+                new = generate_pipes(1)
+                for n in new:
+                    n.x = last_x + 650
+                pipes.extend(new)
+            screen.blit(background, (0, 0))
+            for p in pipes:
+                pygame.draw.rect(screen, (0, 255, 0), p)
+                if bird.colliderect(p):
+                    run = False
+            screen.blit(bird_img, (bird.x, bird.y))
+            score_text = font.render("Score: " + str(score), True, (255, 255, 255))
+            screen.blit(score_text, (0,0))
+            pygame.display.update()
+            clock.tick(60)
     show_restart()
 
 while True:
